@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+venv/
+env/
+.env
+
+# Model weights (too large for GitHub)
+models/*.pth
+models/*.pt
+models/*.bin
+
+# Training data (too large for GitHub)
+data/indian_roads/
+
+# IDE / Claude
+.claude/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/

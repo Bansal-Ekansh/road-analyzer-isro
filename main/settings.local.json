@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Get-ChildItem \"c:\\\\Users\\\\KEVINDEEP SINGH\\\\OneDrive\\\\Desktop\\\\isro\" -Recurse | Where-Object { -not $_.PSIsContainer } | Select-Object @{N='Path';E={$_.FullName.Replace\\(\"c:\\\\Users\\\\KEVINDEEP SINGH\\\\OneDrive\\\\Desktop\\\\isro\\\\\",\"\"\\)}} | Format-Table -AutoSize)",
+      "PowerShell(& \"C:\\\\Users\\\\KEVINDEEP SINGH\\\\AppData\\\\Local\\\\Packages\\\\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\\\\LocalCache\\\\local-packages\\\\Python313\\\\python.exe\" -m pip install --upgrade torch torchvision --index-url https://download.pytorch.org/whl/cu121)",
+      "PowerShell(& \"C:\\\\Users\\\\KEVINDEEP SINGH\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python313\\\\python.exe\" -c \"import torch; print\\('torch:', torch.__version__\\); print\\('CUDA available:', torch.cuda.is_available\\(\\)\\)\")",
+      "PowerShell(& \"C:\\\\Users\\\\KEVINDEEP SINGH\\\\AppData\\\\Local\\\\Packages\\\\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\\\\LocalCache\\\\local-packages\\\\Python313\\\\Scripts\\\\pip.exe\" show torch torchvision 2>&1)",
+      "PowerShell(& \"C:\\\\Users\\\\KEVINDEEP SINGH\\\\AppData\\\\Local\\\\Packages\\\\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\\\\LocalCache\\\\local-packages\\\\Python313\\\\Scripts\\\\pip.exe\" install torch torchvision --index-url https://download.pytorch.org/whl/cu128 --upgrade 2>&1)",
+      "PowerShell(& \"C:\\\\Users\\\\KEVINDEEP SINGH\\\\AppData\\\\Local\\\\Packages\\\\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\\\\LocalCache\\\\local-packages\\\\Python313\\\\Scripts\\\\pip.exe\" install --force-reinstall torch torchvision --index-url https://download.pytorch.org/whl/cu128 2>&1)",
+      "PowerShell(Get-Process -Name \"streamlit\" -ErrorAction SilentlyContinue)",
+      "PowerShell(Stop-Process -Force)",
+      "PowerShell(Start-Process -FilePath \"C:\\\\Users\\\\KEVINDEEP SINGH\\\\OneDrive\\\\Desktop\\\\isro\\\\run.bat\" -WindowStyle Normal)"
+    ]
+  }
+}
