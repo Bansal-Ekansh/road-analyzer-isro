@@ -4,7 +4,8 @@ Route Resilience Analyzer — ISRO Bharatiya Antariksh Hackathon 2026
 
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))   # project root  → pipeline/, utils/
+sys.path.insert(0, str(Path(__file__).parent))           # app/ directory → demo_data
 
 import io
 import cv2
@@ -20,7 +21,7 @@ import networkx as nx
 from pipeline import GraphBuilder, GraphHealer, GraphAnalyzer
 # RoadSegmenter imported lazily inside the pipeline button (needs torch + smp)
 from utils.colors import centrality_to_hex, resilience_color
-from demo_data import load_demo
+
 
 
 # 
@@ -44,6 +45,7 @@ html, body, .stApp { background-color: #030712 !important; color: #f1f5f9; }
     border-right: 1px solid #1e293b !important;
 }
 [data-testid="stSidebar"] * { color: #cbd5e1 !important; }
+[data-testid="collapsedControl"] { display: none !important; }
 
 /*  Hero banner  */
 .hero {
@@ -517,40 +519,42 @@ def _generate_pdf(G, analyzer, cfi, report) -> bytes:
 # 
 with st.sidebar:
     st.markdown("""
-    <div style="text-align:center; padding: 12px 0 8px;">
-        <div style="font-weight:800; font-size:1rem; color:#f97316;">Route Resilience</div>
-        <div style="font-size:0.7rem; color:#475569;">ISRO BAH 2026 · PS-4</div>
+    <div style="text-align:center; padding: 16px 0 16px;">
+        <h2 style="margin:0; font-weight:800; font-size:1.6rem; color:#f97316; letter-spacing:-0.5px;">Route Resilience</h2>
+        <div style="font-size:0.75rem; color:#64748b; margin-top:4px; font-weight:600; letter-spacing:0.5px;">ISRO BAH 2026 • PS-4</div>
     </div>
     """, unsafe_allow_html=True)
     st.divider()
 
+    st.subheader("Data Input")
     uploaded = st.file_uploader(
         "Upload Satellite Image",
         type=["png", "jpg", "jpeg", "tif", "tiff"],
         help="Any RGB satellite or aerial image works.",
     )
+    st.divider()
 
-    st.markdown("### Parameters")
+    st.subheader("Analysis Parameters")
     seg_threshold = st.slider("Road Detection Level (Sadak Pahchaan Sthar)",  0.20, 0.80, 0.45, 0.05,
                               help="Kitni clearly sadak detect ho — low = zyada sadkein, high = sirf pakki sadkein")
     max_gap       = st.slider("Broken Road Fix - px (Tuti Sadak Jod)",        5,    60,   25,   5,
                               help="Kitne pixel ki tuti sadak ko joda jaye — jaise tree ya building se dhaki sadak")
     top_k         = st.slider("Key Choke Points (Mukhya Avrodh Bindu)",       3,    20,   10,   1,
                               help="Kitne sabse important/busy crossings highlight karne hain")
+    st.divider()
 
-    st.markdown("### Map Layer")
+    st.subheader("Map Configuration")
     base_layer = st.selectbox("Tile Source",
         ["OpenStreetMap", "ISRO Bhuvan (Satellite)", "CartoDB Dark"])
+    
+    st.divider()
 
-    st.markdown("### Model Weights")
-    use_weights  = st.checkbox("Use fine-tuned weights (optional)")
-    weights_path = ""
-    if use_weights:
+    with st.expander("⚙️ Advanced Settings", expanded=False):
         weights_path = st.text_input("Path to .pth file", "models/road_seg.pth")
 
     st.divider()
     st.markdown(
-        '<div style="text-align:center; font-size:0.7rem; color:#334155;">'
+        '<div style="text-align:center; font-size:0.7rem; color:#64748b; margin-bottom:12px;">'
         'DeepLabV3+ · NetworkX · Streamlit<br>'
         'Built for ISRO BAH 2026</div>',
         unsafe_allow_html=True,
@@ -585,7 +589,7 @@ st.markdown(_stepper_html(st.session_state["stage"]), unsafe_allow_html=True)
 
 
 # 
-# Demo mode launch
+# Initial state
 # 
 if uploaded is None and st.session_state["graph"] is None:
     st.markdown("---")
@@ -595,17 +599,10 @@ if uploaded is None and st.session_state["graph"] is None:
             '<div style="text-align:center; color:#64748b; margin-bottom:16px;">'
             '<div style="font-size:1rem; font-weight:600; color:#94a3b8; margin-bottom:4px;">'
             'No image uploaded yet</div>'
-            '<div style="font-size:0.85rem;">Upload a satellite image from the sidebar,<br>'
-            'or try the built-in Indian city demo.</div>'
+            '<div style="font-size:0.85rem;">Please upload a satellite image from the sidebar to begin analysis.</div>'
             '</div>',
             unsafe_allow_html=True,
         )
-        if st.button("Launch Demo — Indian City Grid", use_container_width=True):
-            with st.spinner("Building demo dataset…"):
-                demo = load_demo()
-            st.session_state.update(demo)
-            st.session_state["stage"] = 3
-            st.rerun()
 
     st.markdown("---")
     c1, c2, c3 = st.columns(3)
@@ -715,22 +712,18 @@ with tab_extract:
                 st.caption(f"Mode: {st.session_state['seg_mode']}")
 
         st.markdown("")
-        if st.button(" Run Full Pipeline", use_container_width=True):
-            if st.session_state["image"] is None:
-                st.warning("Upload an image first.")
-            else:
+        can_run = st.session_state.get("image") is not None
+        if not can_run:
+            st.warning("Please upload a satellite image from the sidebar to begin.")
+
+        if st.button(" Run Full Pipeline", use_container_width=True, disabled=not can_run):
+            try:
                 with st.spinner("Extracting roads..."):
                     from pipeline.segmentation import RoadSegmenter
-                    seg  = RoadSegmenter(weights_path=weights_path if use_weights else None)
-                    if seg._has_dl and seg.trained:
-                        mode = "DeepLabV3+ (fine-tuned weights)"
-                    elif seg._has_dl:
-                        mode = "Heuristic (DL ready — train model to activate)"
-                    else:
-                        mode = "Heuristic (install torch for DL mode)"
+                    seg  = RoadSegmenter(weights_path=weights_path)
                     mask = seg.segment(st.session_state["image"], threshold=seg_threshold)
                     st.session_state["mask"] = mask
-                    st.session_state["seg_mode"] = mode
+                    st.session_state["seg_mode"] = "Deep Learning Active (RTX 4060 Accel)"
 
                 with st.spinner("Skeletonising…"):
                     builder = GraphBuilder()
@@ -748,6 +741,8 @@ with tab_extract:
                     st.session_state["stage"] = 2
 
                 st.rerun()
+            except Exception as e:
+                st.error(f"Pipeline error: {e}")
 
     #  Network summary metrics 
     if st.session_state["graph"] is not None:

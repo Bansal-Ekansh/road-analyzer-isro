@@ -1,32 +1,21 @@
-# Python
-__pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-.Python
-
-# Virtual environments
+# Python environments and cache
+.venv/
 venv/
-env/
-.env
-
-# Model weights (too large for GitHub)
-models/*.pth
-models/*.pt
-models/*.bin
-
-# Training data (too large for GitHub)
-data/indian_roads/
-
-# IDE / Claude
-.claude/
-
-# Streamlit
-.streamlit/secrets.toml
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Jupyter
+__pycache__/
+*.pyc
 .ipynb_checkpoints/
+
+# Datasets and imagery
+data/
+*.png
+*.jpg
+*.tif
+
+# Machine Learning Model Weights
+models/
+*.pth
+*.pt
+
+# System and Environment files
+.env
+.DS_Store

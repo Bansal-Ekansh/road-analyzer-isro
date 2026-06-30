@@ -19,7 +19,7 @@ def get_train_transforms():
     - Fog simulates haze/pollution common over Indian cities
     """
     return A.Compose([
-        A.RandomResizedCrop(512, 512, scale=(0.7, 1.0), ratio=(0.8, 1.2), p=1.0),
+        A.RandomResizedCrop(size=(512, 512), scale=(0.7, 1.0), ratio=(0.8, 1.2), p=1.0),
         A.HorizontalFlip(p=0.5),
         A.VerticalFlip(p=0.5),
         A.RandomRotate90(p=0.5),
@@ -32,10 +32,10 @@ def get_train_transforms():
         ], p=0.8),
 
         # Simulate tree canopy / shadow over roads
-        A.RandomShadow(num_shadows_lower=1, num_shadows_upper=3, shadow_dimension=5, p=0.4),
+        A.RandomShadow(num_shadows_limit=(1, 3), shadow_dimension=5, p=0.4),
 
         # Simulate haze/pollution over dense Indian cities
-        A.RandomFog(fog_coef_lower=0.05, fog_coef_upper=0.25, alpha_coef=0.08, p=0.3),
+        A.RandomFog(fog_coef_range=(0.05, 0.25), alpha_coef=0.08, p=0.3),
 
         # Simulate cloud patches / construction occlusion
         A.CoarseDropout(
@@ -46,7 +46,7 @@ def get_train_transforms():
         ),
 
         # Simulate JPEG compression artefacts in low-res Bhuvan tiles
-        A.ImageCompression(quality_lower=60, quality_upper=95, p=0.3),
+        A.ImageCompression(quality_range=(60, 95), p=0.3),
 
         # Blur — simulates motion blur in satellite or resampling artefacts
         A.OneOf([
@@ -64,7 +64,7 @@ def get_train_transforms():
 
 def get_val_transforms():
     return A.Compose([
-        A.Resize(512, 512),
+        A.Resize(height=512, width=512),
         A.Normalize(
             mean=[0.485, 0.456, 0.406],
             std =[0.229, 0.224, 0.225],
