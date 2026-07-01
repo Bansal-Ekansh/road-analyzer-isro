@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))   # project root  → pipe
 sys.path.insert(0, str(Path(__file__).parent))           # app/ directory → demo_data
 
 import io
+import os
 import cv2
 import numpy as np
 import pandas as pd
@@ -15,10 +16,24 @@ import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
 import networkx as nx
+import gdown
 
 from pipeline import GraphBuilder, GraphHealer, GraphAnalyzer
 # RoadSegmenter imported lazily inside the pipeline button (needs torch + smp)
 from utils.colors import centrality_to_hex, resilience_color
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Ensure model weights are present (download from Google Drive if missing)
+# Runs once at app startup; skipped on every subsequent re-run because of the
+# os.path.exists guard — so there is zero overhead after the first cold start.
+# ─────────────────────────────────────────────────────────────────────────────
+os.makedirs("models", exist_ok=True)
+if not os.path.exists("models/road_seg.pth"):
+    print("Downloading model weights from Google Drive...")
+    file_id = "1XHZ3HRgbObbOH23ZrBlZuCJsm8gorcgF"
+    gdown.download(id=file_id, output="models/road_seg.pth", quiet=False)
+
 
 
 
