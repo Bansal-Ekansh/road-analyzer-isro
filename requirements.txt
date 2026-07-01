@@ -1,13 +1,46 @@
-torch
-torchvision
-streamlit
-osmnx
-albumentations
-pydantic
-shapely
-matplotlib
-tqdm
-plotly
-validators
-folium
-segmentation_models_pytorch
+# ─────────────────────────────────────────────────────────────────────────────
+# Route Resilience Analyzer — ISRO BAH 2026
+# Python dependencies for Streamlit Community Cloud deployment
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Web framework
+streamlit>=1.35.0
+
+# Deep Learning (CPU build — Streamlit Cloud has no GPU)
+# Install the CPU-only wheel explicitly to keep slug size manageable.
+# See: https://download.pytorch.org/whl/cpu
+torch>=2.0.0
+torchvision>=0.15.0
+
+# Road segmentation model
+segmentation-models-pytorch>=0.3.3
+
+# Computer vision & image processing
+opencv-python-headless>=4.8.0  # headless avoids libGL dependency clash with packages.txt
+scikit-image>=0.21.0
+
+# Training augmentations (needed at inference for the albumentations Normalize)
+albumentations>=1.4.0
+
+# Geospatial graph
+networkx>=3.1
+shapely>=2.0.0
+osmnx>=1.9.0
+
+# Data & plotting
+matplotlib>=3.7.0
+plotly>=5.18.0
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Geospatial / reporting (folium removed — Live Map feature was removed)
+# folium>=0.15.0
+# streamlit-folium>=0.20.0
+
+# PDF report generation
+reportlab>=4.0.0
+
+# Utilities
+tqdm>=4.65.0
+Pillow>=10.0.0
+requests>=2.31.0

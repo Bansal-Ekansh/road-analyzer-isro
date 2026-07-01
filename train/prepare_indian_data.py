@@ -16,12 +16,17 @@ Defensive features:
   - SKIP_CITIES list at the top — toggle off dense/slow cities by name
   - 30-second hard timeout on all OSM + tile server requests
   - Exponential-backoff retry (up to 3 attempts) on tile HTTP errors
-  - Smart dual-cache: skips any tile pair already saved to disk
+  - City-level early exit: counts existing pairs before touching OSM/Esri
+    → fully complete city (80 pairs) → returns immediately, zero network calls
+    → partial city            (N < 80) → only downloads the missing (80 - N)
+  - Per-tile cache check: skips individual tiles already saved to disk
+  - Consistent naming: {CitySlug}_{TileX}_{TileY}.png for images & masks
   - Nested tqdm progress bars: cities → tiles within each city
 """
 
 import math
 import io
+import os
 import random
 import time
 from pathlib import Path
@@ -69,10 +74,12 @@ PATCH_SIZE      = 512    # output patch = 2×2 tiles stitched together
 TILES_PER_CITY  = 80     # max tile-patches to save per city
 OUTPUT_DIR      = Path("data/indian_roads")
 
-# Tile server (free OSM raster tiles — be polite: 50 ms sleep between fetches)
-TILE_SERVER  = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+# Tile server — Esri World Imagery (real satellite basemap, no API key required)
+# NOTE: Esri tile URL order is {z}/{y}/{x}, opposite of OSM's {z}/{x}/{y}
+# This is the ONLY tile source. There is no fallback to OSM or any other provider.
+ESRI_SAT_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
 USER_AGENT   = "ISROHackathon2026/1.0 (research-use-only)"
-TILE_DELAY_S = 0.07      # seconds between individual tile HTTP requests
+TILE_DELAY_S = 0.12     # seconds between requests — be polite to Esri CDN
 
 # Network timeouts & retry
 OSM_TIMEOUT_S   = 30     # hard deadline for the osmnx Overpass API call
@@ -96,7 +103,20 @@ MIN_ROAD_RATIO = 0.005   # 0.5 % of 512×512 = ~1310 road pixels
 
 def latlon_to_pixel(lat: float, lon: float,
                     tile_x: int, tile_y: int, zoom: int) -> tuple[float, float]:
-    """Map (lat, lon) to pixel (x, y) offset within a 512×512 patch origin."""
+    """
+    Convert WGS-84 (EPSG:4326) lat/lon to pixel offset within a 512×512 patch.
+
+    CRS alignment guarantee
+    -----------------------
+    Esri World Imagery tiles are served in Web Mercator (EPSG:3857).
+    The Slippy-map tile formula below is the *inverse* of Web Mercator
+    projection — it converts (lat, lon) → (tile_pixel_x, tile_pixel_y) using
+    exactly the same math the tile server uses to place pixels on the image.
+    Because both the road mask rasterizer and the satellite tile stitch use
+    this same formula rooted at (tile_x, tile_y, zoom), the road lines will
+    be pixel-perfectly aligned with the Esri satellite imagery with no CRS
+    shift or offset.
+    """
     n = 2 ** zoom
     gx = (lon + 180.0) / 360.0 * n * TILE_SIZE
     sin_lat = math.sin(math.radians(lat))
@@ -111,35 +131,35 @@ def latlon_to_pixel(lat: float, lon: float,
 def fetch_tile(z: int, x: int, y: int,
                session: requests.Session) -> Image.Image | None:
     """
-    Download one 256×256 OSM raster tile with up to MAX_TILE_RETRIES attempts.
-    Returns a PIL RGB Image, or None if all attempts fail.
-    Uses TILE_TIMEOUT_S as a hard connection+read deadline.
+    Download one 256×256 Esri World Imagery satellite tile.
+    Only contacts ESRI_SAT_URL — no fallback to any other provider.
+    Returns a PIL RGB Image on success, or None on any failure.
+    KeyboardInterrupt is re-raised so Ctrl+C still works.
     """
-    url = TILE_SERVER.format(z=z, x=x, y=y)
+    url = ESRI_SAT_URL.format(z=z, y=y, x=x)
+    print(f"    Fetching Satellite Tile: {url}")
     for attempt in range(1, MAX_TILE_RETRIES + 1):
         try:
             r = session.get(url, timeout=TILE_TIMEOUT_S)
             r.raise_for_status()
             return Image.open(io.BytesIO(r.content)).convert("RGB")
-        except requests.exceptions.Timeout:
-            wait = 2 ** attempt          # 2 s, 4 s, 8 s
-            tqdm.write(f"    ⚠  Tile {z}/{x}/{y} timed out "
-                       f"(attempt {attempt}/{MAX_TILE_RETRIES}), "
-                       f"retrying in {wait}s…")
-            time.sleep(wait)
-        except requests.exceptions.HTTPError as e:
-            if e.response is not None and e.response.status_code == 429:
-                wait = 5 * attempt       # rate-limit: longer back-off
-                tqdm.write(f"    ⚠  Rate-limited on tile {z}/{x}/{y} — "
-                           f"waiting {wait}s before retry {attempt}/{MAX_TILE_RETRIES}…")
+        except KeyboardInterrupt:
+            raise   # always let Ctrl+C through
+        except Exception as exc:
+            if attempt < MAX_TILE_RETRIES:
+                wait = 2 ** attempt   # 2 s, 4 s, 8 s back-off
+                tqdm.write(
+                    f"    ⚠  Tile {z}/{y}/{x} failed "
+                    f"(attempt {attempt}/{MAX_TILE_RETRIES}): {type(exc).__name__} — "
+                    f"retrying in {wait}s…"
+                )
                 time.sleep(wait)
             else:
-                tqdm.write(f"    ✗  HTTP {e.response.status_code} on tile {z}/{x}/{y}, skipping.")
+                tqdm.write(
+                    f"    ✗  Tile {z}/{y}/{x} gave up after {MAX_TILE_RETRIES} "
+                    f"attempts: {type(exc).__name__}: {exc}"
+                )
                 return None
-        except Exception as exc:
-            tqdm.write(f"    ✗  Tile {z}/{x}/{y} error: {exc!r}, skipping.")
-            return None
-    tqdm.write(f"    ✗  Tile {z}/{x}/{y} failed after {MAX_TILE_RETRIES} attempts.")
     return None
 
 
@@ -152,6 +172,15 @@ def rasterize_roads(road_network, tile_x: int, tile_y: int,
     """
     Draw OSM road edges onto a blank canvas of size×size pixels.
     Returns a uint8 binary mask (0 = background, 255 = road).
+
+    CRS / alignment note
+    --------------------
+    OSM node coordinates are WGS-84 (lon, lat) — EPSG:4326.
+    The Esri satellite tiles are in Web Mercator (EPSG:3857).
+    Both are aligned because `latlon_to_pixel` applies the same
+    Slippy-map formula that the tile server uses to render pixels,
+    rooted at the same (tile_x, tile_y, zoom) anchor.
+    Result: road mask pixels correspond 1-to-1 with satellite pixels.
     """
     mask = Image.new("L", (size, size), 0)
     draw = ImageDraw.Draw(mask)
@@ -194,10 +223,42 @@ def prepare_city(city_name: str, session: requests.Session,
     """
     city_slug = city_name.split(",")[0].strip().replace(" ", "_")
 
-    # ── Step 1: Download OSM road graph with a hard timeout ──────────────────
+    # ── Step 0a: Absolute disk-count guard (os.listdir) ───────────────────
+    # Count how many IMAGE files for this city are already on disk.
+    # This runs in milliseconds and fires BEFORE any OSM or Esri network call.
+    if img_dir.exists():
+        saved_count = len([
+            f for f in os.listdir(img_dir)
+            if f.startswith(city_slug + "_") and f.endswith(".png")
+        ])
+    else:
+        saved_count = 0
+
     tqdm.write(f"\n{'─'*60}")
     tqdm.write(f"  🏙  Processing: {city_name}")
     tqdm.write(f"{'─'*60}")
+
+    if saved_count >= TILES_PER_CITY:
+        print(f"  ✅ {city_name} already has {saved_count} images. Skipping.")
+        return saved_count
+
+    # ── Step 0b: Set-intersection cache check ────────────────────────────
+    # Count only COMPLETE pairs (both image AND mask on disk).
+    existing_imgs  = set(p.stem for p in img_dir.glob(f"{city_slug}_*.png"))
+    existing_masks = set(p.stem for p in msk_dir.glob(f"{city_slug}_*.png"))
+    existing_pairs = existing_imgs & existing_masks
+    n_existing     = len(existing_pairs)
+
+    need_more = TILES_PER_CITY - n_existing
+    if n_existing > 0:
+        tqdm.write(
+            f"  ♻   {city_name}: {n_existing} pairs on disk, "
+            f"need {need_more} more to reach {TILES_PER_CITY}."
+        )
+    else:
+        tqdm.write(f"  ⬇  No existing patches — downloading up to {TILES_PER_CITY}.")
+
+    # ── Step 1: Download OSM road graph with a hard timeout ──────────────────
     tqdm.write(f"  ⬇  Fetching OSM road network (timeout={OSM_TIMEOUT_S}s)…")
 
     try:
@@ -215,7 +276,7 @@ def prepare_city(city_name: str, session: requests.Session,
             f"  ✗  Timeout / rate-limit hit for {city_name} — skipping to next city.\n"
             f"     Error: {exc!r}"
         )
-        return 0
+        return n_existing  # preserve any existing count
 
     # ── Step 2: Get tile bounding box ────────────────────────────────────────
     try:
@@ -226,26 +287,29 @@ def prepare_city(city_name: str, session: requests.Session,
         lon_max = nodes_gdf.geometry.x.max()
     except Exception as exc:
         tqdm.write(f"  ✗  Could not extract node GeoDataFrame: {exc!r}")
-        return 0
+        return n_existing
 
     tiles = list(mercantile.tiles(lon_min, lat_min, lon_max, lat_max, zooms=ZOOM_LEVEL))
     if not tiles:
         tqdm.write("  ✗  No tiles found for bounding box — skipping.")
-        return 0
+        return n_existing
 
     random.shuffle(tiles)
-    tqdm.write(f"  ℹ  {len(tiles)} candidate tiles at zoom {ZOOM_LEVEL} "
-               f"(will save up to {TILES_PER_CITY})")
+    tqdm.write(
+        f"  ℹ  {len(tiles)} candidate tiles at zoom {ZOOM_LEVEL} "
+        f"(already have {n_existing}, will save up to {need_more} more)"
+    )
 
     # ── Step 3: Download & save tile pairs ───────────────────────────────────
-    saved  = 0
-    tried  = 0
-    cached = 0
+    saved       = n_existing  # running total (existing + new)
+    new_saved   = 0           # tracks only what we download in this run
+    tried       = 0
+    saved_count = 0           # explicit counter for the hard-stop break
 
     # Inner tqdm: shows individual tile progress within this city
     tile_bar = tqdm(
         tiles,
-        total=min(len(tiles), TILES_PER_CITY),
+        total=min(len(tiles), need_more),
         desc=f"  {city_slug[:12]:<12} tiles",
         unit="tile",
         leave=True,
@@ -254,7 +318,12 @@ def prepare_city(city_name: str, session: requests.Session,
     )
 
     for tile in tile_bar:
-        if saved >= TILES_PER_CITY:
+        # ── Hard-stop guard: checked at top of EVERY iteration ───────────────
+        if saved_count >= need_more:
+            tqdm.write(
+                f"  ✅ Reached {TILES_PER_CITY} tiles for {city_name}. "
+                f"Moving to next city."
+            )
             break
 
         tx, ty, tz = tile.x, tile.y, tile.z
@@ -262,12 +331,10 @@ def prepare_city(city_name: str, session: requests.Session,
         img_path   = img_dir / f"{stem}.png"
         msk_path   = msk_dir / f"{stem}.png"
 
-        # ── Smart cache check: BOTH files must exist to skip ─────────────────
-        if img_path.exists() and msk_path.exists():
-            cached += 1
-            saved  += 1
-            tile_bar.set_postfix(saved=saved, cached=cached, tried=tried)
-            tile_bar.update(1)
+        # ── Per-tile cache check: skip if BOTH files already exist ────────────
+        if stem in existing_pairs or (img_path.exists() and msk_path.exists()):
+            # Already counted in n_existing; don't double-count
+            tile_bar.set_postfix(new=new_saved, tried=tried, total=saved)
             continue
 
         tried += 1
@@ -289,7 +356,7 @@ def prepare_city(city_name: str, session: requests.Session,
             rows.append(row)
 
         if not valid:
-            tile_bar.set_postfix(saved=saved, cached=cached, tried=tried)
+            tile_bar.set_postfix(new=new_saved, tried=tried, total=saved)
             continue
 
         # Stitch
@@ -306,21 +373,36 @@ def prepare_city(city_name: str, session: requests.Session,
         # Skip if road density is too low (rural / water tile)
         road_ratio = (mask > 0).sum() / (PATCH_SIZE * PATCH_SIZE)
         if road_ratio < MIN_ROAD_RATIO:
-            tile_bar.set_postfix(saved=saved, cached=cached, tried=tried,
+            tile_bar.set_postfix(new=new_saved, tried=tried, total=saved,
                                  last="sparse-skip")
             continue
 
-        # ── Save both files atomically ────────────────────────────────────────
+        # ── Save both files ───────────────────────────────────────────────────
         cv2.imwrite(str(img_path), cv2.cvtColor(patch_np, cv2.COLOR_RGB2BGR))
         cv2.imwrite(str(msk_path), mask)
-        saved += 1
 
-        tile_bar.set_postfix(saved=saved, cached=cached, tried=tried)
+        # Increment ALL counters immediately after confirmed save
+        saved_count += 1
+        saved       += 1
+        new_saved   += 1
+
+        tile_bar.set_postfix(new=new_saved, tried=tried, total=saved)
         tile_bar.update(1)
 
+        # ── Post-save explicit stop: fires immediately when limit is hit ──────
+        if saved_count >= need_more:
+            tqdm.write(
+                f"  ✅ Reached {TILES_PER_CITY} tiles for {city_name}. "
+                f"Moving to next city."
+            )
+            break
+
     tile_bar.close()
-    tqdm.write(f"  ✅  {city_name}: {saved} patches saved "
-               f"({cached} from cache, {tried} freshly downloaded)")
+    tqdm.write(
+        f"  ✅  {city_name}: {saved} total pairs "
+        f"({new_saved} newly downloaded, {tried} tiles attempted, "
+        f"{n_existing} already existed)"
+    )
     return saved
 
 

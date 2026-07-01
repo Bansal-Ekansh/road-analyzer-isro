@@ -1,5 +1,14 @@
 """
 PyTorch Dataset for road segmentation with Indian-specific augmentations.
+
+Training augmentations include:
+  - Geometry: crop, flip, rotate
+  - Colour: hue/saturation shift, RGB shift, colour jitter (time-of-day simulation)
+  - Lighting: RandomBrightnessContrast (forces model to ignore illumination, focus on shape)
+  - Occlusion: CoarseDropout p=0.8 (dense canopy / cloud patches over roads)
+  - Noise: GaussNoise (simulates satellite sensor noise / quantisation)
+  - Shadow & fog: RandomShadow (tree canopy), RandomFog (haze/pollution)
+  - Sensor artefacts: JPEG compression, Gaussian/motion blur
 """
 
 import cv2
@@ -12,11 +21,9 @@ from albumentations.pytorch import ToTensorV2
 
 def get_train_transforms():
     """
-    Augmentation pipeline tuned for Indian satellite imagery challenges:
-    - Colour shift handles laterite (red) roads, concrete (white), asphalt (black)
-    - RandomShadow simulates tree canopy cover
-    - Occlusion patches simulate buildings / cloud shadow
-    - Fog simulates haze/pollution common over Indian cities
+    Augmentation pipeline tuned for Indian satellite imagery challenges.
+    Specifically hardened to handle barely-visible streets under tree canopy,
+    cloud shadows, sensor noise, and extreme lighting conditions.
     """
     return A.Compose([
         A.RandomResizedCrop(size=(512, 512), scale=(0.7, 1.0), ratio=(0.8, 1.2), p=1.0),
@@ -31,19 +38,31 @@ def get_train_transforms():
             A.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.15, p=1.0),
         ], p=0.8),
 
+        # Force model to ignore lighting — focus on road shape/texture, not brightness
+        # Critical for dawn/dusk imagery and heavily shadowed urban canyons
+        A.RandomBrightnessContrast(brightness_limit=0.3, contrast_limit=0.3, p=0.6),
+
         # Simulate tree canopy / shadow over roads
         A.RandomShadow(num_shadows_limit=(1, 3), shadow_dimension=5, p=0.4),
 
         # Simulate haze/pollution over dense Indian cities
         A.RandomFog(fog_coef_range=(0.05, 0.25), alpha_coef=0.08, p=0.3),
 
-        # Simulate cloud patches / construction occlusion
+        # Dense tree canopy / thick cloud patches masking roads — increased to p=0.8
+        # The model MUST learn to infer road presence from partial/neighbouring context
         A.CoarseDropout(
-            num_holes_range=(1, 5),
-            hole_height_range=(20, 60),
-            hole_width_range=(20, 60),
-            fill=0, p=0.3,
+            num_holes_range=(4, 12),
+            hole_height_range=(16, 64),
+            hole_width_range=(16, 64),
+            fill=0, p=0.8,
         ),
+
+        # Simulate satellite sensor noise and quantisation artefacts
+        # std_range is the correct param in albumentations >= 1.4 (var_limit was removed)
+        A.GaussNoise(std_range=(0.03, 0.22), p=0.4),
+
+        # Simulate different times of day / seasonal lighting conditions
+        A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1, p=0.5),
 
         # Simulate JPEG compression artefacts in low-res Bhuvan tiles
         A.ImageCompression(quality_range=(60, 95), p=0.3),

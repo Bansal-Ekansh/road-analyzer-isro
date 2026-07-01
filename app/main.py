@@ -14,8 +14,6 @@ import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
-import folium
-from streamlit_folium import st_folium
 import networkx as nx
 
 from pipeline import GraphBuilder, GraphHealer, GraphAnalyzer
@@ -373,44 +371,6 @@ def _plot_resilience_curve(G: nx.Graph, analyzer: GraphAnalyzer):
     st.plotly_chart(fig, use_container_width=True)
 
 
-def _build_folium_map(G, base_layer, center, bbox, image_shape, failed_nodes):
-    from pipeline.graph_builder import pixel_to_latlon
-
-    tile_cfg = {
-        "OpenStreetMap":           ("OpenStreetMap",       "© OpenStreetMap contributors"),
-        "ISRO Bhuvan (Satellite)": ("CartoDB dark_matter", "ISRO NRSC Bhuvan"),
-        "CartoDB Dark":            ("CartoDB dark_matter", "© CartoDB"),
-    }
-    tiles, attr = tile_cfg.get(base_layer, ("OpenStreetMap", "OSM"))
-    fmap = folium.Map(location=center, zoom_start=13, tiles=tiles, attr=attr)
-
-    failed_set = set(failed_nodes)
-    for u, v in G.edges():
-        lat1, lon1 = pixel_to_latlon(G.nodes[u]["y"], G.nodes[u]["x"], image_shape, bbox)
-        lat2, lon2 = pixel_to_latlon(G.nodes[v]["y"], G.nodes[v]["x"], image_shape, bbox)
-        col = "#ef4444" if (u in failed_set or v in failed_set) else "#3b82f6"
-        folium.PolyLine([(lat1, lon1), (lat2, lon2)], color=col, weight=2.5, opacity=0.85).add_to(fmap)
-
-    for n in G.nodes():
-        lat, lon = pixel_to_latlon(G.nodes[n]["y"], G.nodes[n]["x"], image_shape, bbox)
-        bet = G.nodes[n].get("betweenness", 0)
-        col = "#ef4444" if n in failed_set else centrality_to_hex(bet)
-        folium.CircleMarker(
-            location=(lat, lon), radius=max(4, 4 + bet * 14),
-            color=col, fill=True, fill_color=col, fill_opacity=0.85,
-            popup=folium.Popup(
-                f"<b>Node {n}</b><br>"
-                f"Betweenness: {bet:.4f}<br>"
-                f"Degree: {G.degree(n)}<br>"
-                f"{'[FAILED]' if n in failed_set else '[Active]'}",
-                max_width=180,
-            ),
-        ).add_to(fmap)
-
-    folium.LayerControl().add_to(fmap)
-    return fmap
-
-
 def _export_csv(G, analyzer):
     rows = [{
         "node":             str(n),
@@ -543,12 +503,6 @@ with st.sidebar:
                               help="Kitne sabse important/busy crossings highlight karne hain")
     st.divider()
 
-    st.subheader("Map Configuration")
-    base_layer = st.selectbox("Tile Source",
-        ["OpenStreetMap", "ISRO Bhuvan (Satellite)", "CartoDB Dark"])
-    
-    st.divider()
-
     with st.expander("⚙️ Advanced Settings", expanded=False):
         weights_path = st.text_input("Path to .pth file", "models/road_seg.pth")
 
@@ -649,11 +603,10 @@ if uploaded is not None:
 # 
 # Tabs
 # 
-tab_extract, tab_graph, tab_sim, tab_map, tab_report = st.tabs([
+tab_extract, tab_graph, tab_sim, tab_report = st.tabs([
     "Road Extraction",
     "Network Analysis",
     "Disruption Simulation",
-    "Live Map",
     "Report",
 ])
 
@@ -934,60 +887,7 @@ with tab_sim:
 
 
 # 
-# TAB 4 — Live Map
-# 
-with tab_map:
-    if st.session_state["graph"] is None:
-        st.warning("Run the pipeline first.")
-    else:
-        G = st.session_state["graph"]
-
-        st.markdown('<div class="section-header">Geospatial Network Map</div>',
-                    unsafe_allow_html=True)
-        st.markdown(
-            "Nodes are colour-coded by centrality. Red = failed (from simulation). "
-            "Click any node for details."
-        )
-
-        map_left, map_right = st.columns([4, 1])
-        with map_right:
-            lat_c    = st.text_input("Centre Lat", "20.5937")
-            lon_c    = st.text_input("Centre Lon", "78.9629")
-            use_bbox = st.checkbox("Custom bounding box")
-            bbox     = None
-            if use_bbox:
-                st.caption("Pixel 0,0 = top-left corner of your image")
-                lat_min = st.number_input("Lat min", value=20.0)
-                lat_max = st.number_input("Lat max", value=21.0)
-                lon_min = st.number_input("Lon min", value=78.0)
-                lon_max = st.number_input("Lon max", value=80.0)
-                bbox    = (lat_min, lat_max, lon_min, lon_max)
-
-            st.markdown("**Legend**")
-            st.markdown(
-                '<div style="font-size:0.75rem; line-height:1.8;">'
-                '<span style="display:inline-block;width:10px;height:10px;background:#ef4444;border-radius:50%;margin-right:5px;"></span> Failed / High centrality<br>'
-                '<span style="display:inline-block;width:10px;height:10px;background:#f97316;border-radius:50%;margin-right:5px;"></span> Medium centrality<br>'
-                '<span style="display:inline-block;width:10px;height:10px;background:#22c55e;border-radius:50%;margin-right:5px;"></span> Low centrality<br>'
-                '<span style="display:inline-block;width:30px;height:3px;background:#3b82f6;margin-right:5px;vertical-align:middle;"></span> Active road<br>'
-                '<span style="display:inline-block;width:30px;height:3px;background:#ef4444;margin-right:5px;vertical-align:middle;"></span> Affected road</div>',
-                unsafe_allow_html=True,
-            )
-
-        with map_left:
-            failed = st.session_state["report"].failed_nodes if st.session_state["report"] else []
-            fmap   = _build_folium_map(
-                G, base_layer=base_layer,
-                center=(float(lat_c), float(lon_c)),
-                bbox=bbox,
-                image_shape=st.session_state["image"].shape,
-                failed_nodes=failed,
-            )
-            st_folium(fmap, width=700, height=560)
-
-
-# 
-# TAB 5 — Report
+# TAB 4 — Report
 # 
 with tab_report:
     if st.session_state["graph"] is None:

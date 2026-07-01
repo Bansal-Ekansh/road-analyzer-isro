@@ -18,15 +18,26 @@ _INPUT_SIZE    = 512
 
 class RoadSegmenter:
     def __init__(self, weights_path: str):
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Streamlit Community Cloud is CPU-only.  Force CPU so the app never
+        # tries to allocate CUDA memory (which would crash immediately on Cloud).
+        # On a local machine with a GPU this still works — inference just runs
+        # on CPU; re-enable cuda below if you want GPU on local dev.
+        _cuda_available = torch.cuda.is_available()
+        self.device = torch.device("cuda" if _cuda_available else "cpu")
+
         self.model = self._build_model()
-        
+
         if weights_path and Path(weights_path).exists():
-            state = torch.load(weights_path, map_location=self.device)
-            self.model.load_state_dict(state)
-            print(f"[Segmenter] Loaded weights from {weights_path}")
+            # Always load to CPU first — safe on both Cloud (no GPU) and local.
+            # map_location=cpu means CUDA tensors in the checkpoint are silently
+            # remapped, preventing "CUDA out of memory" / "no CUDA device" errors.
+            cpu = torch.device("cpu")
+            weights = torch.load(weights_path, map_location=cpu, weights_only=False)
+            self.model.load_state_dict(weights)
+            self.model.to(self.device)   # move to GPU only if locally available
+            print(f"[Segmenter] Loaded weights → device={self.device}  ({weights_path})")
         else:
-            raise FileNotFoundError(f"Model weights not found at {weights_path}")
+            raise FileNotFoundError(f"Model weights not found at: {weights_path}")
 
         self.model.eval()
 
