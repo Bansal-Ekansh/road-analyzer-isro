@@ -178,25 +178,28 @@ st.markdown(ISRO_CSS, unsafe_allow_html=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Cinematic preloader — shown once on every cold start / page load
-# Clears itself after 2.5 s so the main UI takes over cleanly.
+# Cinematic preloader — shown ONCE per browser session (first page load only).
+# The session_state flag ensures every subsequent re-run (pipeline button,
+# slider change, tab switch, etc.) skips the sleep entirely.
 # ─────────────────────────────────────────────────────────────────────────────
-_preloader = st.empty()
-with _preloader.container():
-    st.markdown("<br><br><br><br>", unsafe_allow_html=True)
-    st.markdown(
-        "<h1 style='text-align:center; color:#f97316;'>"
-        "Route Resilience: Road Analyzer</h1>",
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        "<h3 style='text-align:center; color:gray;'>"
-        "ISRO BAH 2026 • PS-4</h3>",
-        unsafe_allow_html=True,
-    )
-    with st.spinner("Initializing neural network and loading dependencies..."):
-        time.sleep(2.5)
-_preloader.empty()
+if not st.session_state.get("_intro_shown", False):
+    st.session_state["_intro_shown"] = True   # set flag BEFORE sleep
+    _preloader = st.empty()
+    with _preloader.container():
+        st.markdown("<br><br><br><br>", unsafe_allow_html=True)
+        st.markdown(
+            "<h1 style='text-align:center; color:#f97316;'>"
+            "Route Resilience: Road Analyzer</h1>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            "<h3 style='text-align:center; color:gray;'>"
+            "ISRO BAH 2026 \u2022 PS-4</h3>",
+            unsafe_allow_html=True,
+        )
+        with st.spinner("Initializing neural network and loading dependencies..."):
+            time.sleep(2.5)
+    _preloader.empty()
 
 # 
 
