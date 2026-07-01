@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent))           # app/ directory → de
 
 import io
 import os
+import time
 import cv2
 import numpy as np
 import pandas as pd
@@ -59,6 +60,9 @@ html, body, .stApp { background-color: #030712 !important; color: #f1f5f9; }
 }
 [data-testid="stSidebar"] * { color: #cbd5e1 !important; }
 [data-testid="collapsedControl"] { display: none !important; }
+
+/*  Hide default Streamlit top header bar  */
+[data-testid="stHeader"] { visibility: hidden; }
 
 /*  Hero banner  */
 .hero {
@@ -173,8 +177,27 @@ button[data-baseweb="tab"][aria-selected="true"] { color: #f97316 !important; bo
 st.markdown(ISRO_CSS, unsafe_allow_html=True)
 
 
-# 
-# Helper functions
+# ─────────────────────────────────────────────────────────────────────────────
+# Cinematic preloader — shown once on every cold start / page load
+# Clears itself after 2.5 s so the main UI takes over cleanly.
+# ─────────────────────────────────────────────────────────────────────────────
+_preloader = st.empty()
+with _preloader.container():
+    st.markdown("<br><br><br><br>", unsafe_allow_html=True)
+    st.markdown(
+        "<h1 style='text-align:center; color:#f97316;'>"
+        "Route Resilience: Road Analyzer</h1>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        "<h3 style='text-align:center; color:gray;'>"
+        "ISRO BAH 2026 • PS-4</h3>",
+        unsafe_allow_html=True,
+    )
+    with st.spinner("Initializing neural network and loading dependencies..."):
+        time.sleep(2.5)
+_preloader.empty()
+
 # 
 
 def _overlay_skeleton(img: np.ndarray, skel: np.ndarray | None) -> np.ndarray:
@@ -493,13 +516,8 @@ def _generate_pdf(G, analyzer, cfi, report) -> bytes:
 # Sidebar
 # 
 with st.sidebar:
-    st.markdown("""
-    <div style="text-align:center; padding: 16px 0 16px;">
-        <h2 style="margin:0; font-weight:800; font-size:1.6rem; color:#f97316; letter-spacing:-0.5px;">Route Resilience</h2>
-        <div style="font-size:0.75rem; color:#64748b; margin-top:4px; font-weight:600; letter-spacing:0.5px;">ISRO BAH 2026 • PS-4</div>
-    </div>
-    """, unsafe_allow_html=True)
-    st.divider()
+    # Header block removed — sidebar now starts directly with Data Input
+    # (the branding is displayed via the cinematic preloader instead)
 
     st.subheader("Data Input")
     uploaded = st.file_uploader(
