@@ -16,7 +16,7 @@ torchvision>=0.15.0
 segmentation-models-pytorch>=0.3.3
 
 # Computer vision & image processing
-opencv-python-headless>=4.8.0  # headless avoids libGL dependency clash with packages.txt
+opencv-python-headless>=4.8.0  # headless build — no libGL runtime required
 scikit-image>=0.21.0
 
 # Training augmentations (needed at inference for the albumentations Normalize)
