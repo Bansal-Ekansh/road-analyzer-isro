@@ -558,19 +558,6 @@ if st.session_state["stage"] is None:
     st.session_state["stage"] = 0
 
 
-# 
-# Hero banner
-# 
-st.markdown("""
-<div class="hero">
-    <p class="hero-title">Route Resilience Analyzer</p>
-    <p class="hero-sub">
-        AI-powered road network extraction · Bottleneck detection · Disaster resilience simulation
-    </p>
-    <span class="badge">ISRO Bharatiya Antariksh Hackathon 2026 — Problem Statement 4</span>
-</div>
-""", unsafe_allow_html=True)
-
 # Pipeline stepper
 st.markdown(_stepper_html(st.session_state["stage"]), unsafe_allow_html=True)
 
