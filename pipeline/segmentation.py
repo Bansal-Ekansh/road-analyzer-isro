@@ -6,18 +6,50 @@ This module now strictly uses the PyTorch deep learning pipeline.
 
 import cv2
 import numpy as np
+import os
 from pathlib import Path
 
 import torch
+import gdown
 import segmentation_models_pytorch as smp
 
 _IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 _IMAGENET_STD  = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 _INPUT_SIZE    = 512
 
+_GDRIVE_FILE_ID  = "1XHZ3HRgbObbOH23ZrBlZuCJsm8gorcgF"
+_WEIGHTS_PATH    = "models/road_seg.pth"
+
+
+def ensure_weights(local_path: str = _WEIGHTS_PATH) -> None:
+    """
+    Download model weights from Google Drive if they are not already present.
+
+    Uses gdown which handles Google Drive's virus-scan confirmation redirect
+    transparently (plain urllib.request only gets an HTML warning page for
+    files larger than ~25 MB — not the actual binary).
+
+    Called automatically by RoadSegmenter.__init__ before torch.load().
+    """
+    if os.path.exists(local_path):
+        return   # already present — skip download entirely
+
+    os.makedirs(os.path.dirname(local_path) or ".", exist_ok=True)
+    url = f"https://drive.google.com/uc?id={_GDRIVE_FILE_ID}"
+    print(f"[Segmenter] Weights not found locally. Downloading from Google Drive…")
+    print(f"            → {url}")
+    print(f"            → {local_path}")
+    gdown.download(url, local_path, quiet=False)
+    if not os.path.exists(local_path):
+        raise RuntimeError(
+            f"Download failed — '{local_path}' still missing after gdown.\n"
+            "Check that the Google Drive file is shared as 'Anyone with the link'."
+        )
+    print(f"[Segmenter] Download complete: {local_path}")
+
 
 class RoadSegmenter:
-    def __init__(self, weights_path: str):
+    def __init__(self, weights_path: str = _WEIGHTS_PATH):
         # Streamlit Community Cloud is CPU-only.  Force CPU so the app never
         # tries to allocate CUDA memory (which would crash immediately on Cloud).
         # On a local machine with a GPU this still works — inference just runs
@@ -26,6 +58,10 @@ class RoadSegmenter:
         self.device = torch.device("cuda" if _cuda_available else "cpu")
 
         self.model = self._build_model()
+
+        # ── Download weights from Google Drive if not cached locally ──────────
+        ensure_weights(weights_path)
+        # ─────────────────────────────────────────────────────────────────────
 
         if weights_path and Path(weights_path).exists():
             # Always load to CPU first — safe on both Cloud (no GPU) and local.
